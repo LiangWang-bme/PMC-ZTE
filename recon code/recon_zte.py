@@ -46,8 +46,7 @@ def recon(connection):
             Tra = acq.user_float[1]
             Sag = acq.user_float[2]
             Cor = acq.user_float[3]
-            phase_correction = acq.idx.repetition #相位校正
-            #phase_correction = False
+            phase_correction = acq.idx.repetition
             
             sigma = 0.2 * LRO
             x = np.arange(1,(LRO + 1))
@@ -55,7 +54,7 @@ def recon(connection):
             
             traj_factor = np.pi * (LRO / IMAGE_SIZE)
             voxel_spacing = [FOV / IMAGE_SIZE] * 3 
-            affine = np.diag(voxel_spacing + [1])  # 4x4 仿射矩阵
+            affine = np.diag(voxel_spacing + [1])  
             affine[0,0] = -affine[0,0]
             affine[1,1] = -affine[1,1]
 
@@ -67,7 +66,6 @@ def recon(connection):
             SpokesPerSeg = acq.idx.kspace_encode_step_1
             
             first_line = Segment * SpokesPerSeg    
-            Repeat = 1                  # 是否进行在线重建，0表示不进行，1表示进行
             
             second_data = np.zeros((LCH,second_line,points),dtype=np.complex64)
             xx2 = np.zeros((second_line,points),dtype=np.float32)
@@ -95,7 +93,7 @@ def recon(connection):
                 total_window = 1.0 / (1 + np.exp((x - total_sigma) / (0.05 * LRO)))
             motion_params = np.zeros(((Segment-1),6))
             
-        if(index <= second_line):   # For Second Data Set
+        if(index <= second_line):   # For WASPI Data Set
 
             start_index = (second_line_index-1) * points
             end_index = start_index + points
@@ -119,7 +117,7 @@ def recon(connection):
             zz2[second_line_index-1,:] = traj_z
             second_line_index = second_line_index + 1
     
-        if(index > second_line):  # For First Data Set
+        if(index > second_line):  # For Interleaf Data Set
             
             start_index = (first_line_index - 1) * LRO
             end_index = start_index + LRO 
@@ -151,9 +149,8 @@ def recon(connection):
                 zz1_copy[first_line_index - 1,:] = traj_z
             first_line_index = first_line_index + 1
             
-            if(acq.flags == 134217728): # first_data的最后一条线，准备重建 + 配准
+            if(acq.flags == 134217728): # The last piece of data from Interleaf, preparing for reconstruction and registration
                 
-                # Last SPE + FeedBack  -->  134217736
                 statr_time = time.time() 
                 first_data_gpu = cp.asarray(first_data)
                 w1_gpu = cp.asarray(w1)
@@ -173,7 +170,7 @@ def recon(connection):
                     cmd = ["3dvolreg","-base",base_path,"-1Dfile",tempfile,moving_path]
                     result = subprocess.run(cmd,stdout=subprocess.PIPE,stderr=subprocess.DEVNULL, text=True,check=True)
                     line = np.loadtxt(tempfile)
-                    motion_params[image_index-2,:] = line   #line中是6个运动参数
+                    motion_params[image_index-2,:] = line   # Six motion parameters in line
                     acq.user_float[0] = line[0]
                     acq.user_float[1] = line[1]
                     acq.user_float[2] = line[2]
@@ -181,9 +178,11 @@ def recon(connection):
                     acq.user_float[4] = line[4]
                     acq.user_float[5] = line[5]
                 end_time = time.time()
-                #print("index : {} , time : {}".format(image_index,end_time-statr_time))
-                if image_index >= 2:
-                    connection.send(acq)
+
+
+                # Online Reconstruction,Send Motion parameters,feedback
+                # if image_index >= 2:
+                #     connection.send(acq)
                     
                 if(Repeat > 0):
                     begin = (image_index - 1)  * SpokesPerSeg
@@ -219,10 +218,7 @@ def recon(connection):
         if phase_correction :
         
             for i in range(1,Segment)  :
-                
-                # roll : z, pitch : x, yaw : y
-                # dS : dz, dL : x, dP : y
-               
+                               
                 dx = motion_params[i-1][4] / voxel
                 dy = -motion_params[i-1][5] / voxel
                 dz = -motion_params[i-1][3] / voxel
@@ -262,16 +258,6 @@ def recon(connection):
                     total_xx1[pindex_start,:] = x
                     total_yy1[pindex_start,:] = y
                     total_zz1[pindex_start,:] = z    
-    
-                # for j in range(0,SpokesPerSeg) :
-                    
-                #     pindex_start = i * SpokesPerSeg + j 
-                #     x = (total_xx1[pindex_start,:])
-                #     y = (total_yy1[pindex_start,:])
-                #     z = (total_zz1[pindex_start,:])
-                #     H = np.exp(-1j*(x * dx + y * dy + z * dz))
-                #     datae = total_first_data[:,pindex_start,:] * H
-                #     total_first_data[:,pindex_start,:] = datae
                 
         if position_correction :
             dz = Tra 
@@ -319,8 +305,8 @@ def recon(connection):
         zte_image_complex = plan.execute(zte_kdata)
         zte_image = np.sum(np.abs(zte_image_complex)**2,axis=0)**(1/2)
 
-        voxel_spacing = [FOV / LRO] *  3    # FOV 与 LRO 保持一致 
-        affine2 = np.diag(voxel_spacing + [1])  # 4x4 仿射矩阵
+        voxel_spacing = [FOV / LRO] *  3    
+        affine2 = np.diag(voxel_spacing + [1]) 
         affine2[0,0] = -affine2[0,0]
         affine2[1,1] = -affine2[1,1]
         img_nifitt_total = nib.Nifti1Image(zte_image, affine2)
@@ -332,7 +318,7 @@ def recon(connection):
             date_folder_path = os.path.join(base_path,date_folder)
             if not os.path.exists(date_folder_path):
                 os.makedirs(date_folder_path)
-            # 4. 扫描日期文件夹中已有的test文件夹，找出最大编号
+
             existing_folders = []
             if os.path.exists(date_folder_path):
                 for item in os.listdir(date_folder_path):
@@ -340,7 +326,6 @@ def recon(connection):
                     if os.path.isdir(item_path) and item.startswith("test"):
                         existing_folders.append(item)
             
-            # 5. 提取已有的test文件夹编号
             max_number = 0
             pattern = re.compile(r'test(\d+)$')
             
@@ -350,12 +335,10 @@ def recon(connection):
                     number = int(match.group(1))
                     if number > max_number:
                         max_number = number
-            # 6. 确定下一个文件夹编号
             next_number = max_number + 1
             new_folder_name = f"test{next_number}"
             new_folder_path = os.path.join(date_folder_path, new_folder_name)
             
-            # 7. 创建新的test文件夹
             os.makedirs(new_folder_path)
             
             nib.save(img_nifitt_total,os.path.join(new_folder_path,"total.nii.gz"))

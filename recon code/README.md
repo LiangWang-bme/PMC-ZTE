@@ -2,7 +2,7 @@
 
 ## Environment
 
-This project has been tested on **Ubuntu 22.04 LTS**.
+This project has been tested on **Ubuntu 20.04 LTS**.
 
 ## Dependencies
 
